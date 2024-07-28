@@ -1,19 +1,17 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/JohannesKaufmann/html-to-markdown/plugin"
+	"github.com/go-shiori/go-readability"
+	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
-
-	"github.com/go-shiori/go-readability"
-	"github.com/sirupsen/logrus"
 )
 
 var log = logrus.New()
@@ -61,20 +59,12 @@ func fetchWebpage(url string) (string, error) {
 	return string(body), nil
 }
 
-func extractContent(html string) (string, error) {
+func extractContent(html string) (readability.Article, error) {
 	article, err := readability.FromReader(strings.NewReader(html), nil)
 	if err != nil {
-		return "", fmt.Errorf("error extracting content: %w", err)
+		return readability.Article{}, fmt.Errorf("error extracting content: %w", err)
 	}
-	fmt.Printf("article.Title %v\n", article.Title)
-	fmt.Printf("article.Byline %v \n", article.Byline)
-	fmt.Printf("article.Image %v \n", article.Image)
-	fmt.Printf("article.Published %v \n", article.PublishedTime)
-	fmt.Printf("article.Content %v \n", article.Content)
-	fmt.Printf("article.Excerpt %v \n", article.Excerpt)
-	fmt.Printf("article.URL %v \n", article.Node)
-	fmt.Printf("article.TextContent %v \n", article.TextContent)
-	return article.Content, nil
+	return article, nil
 }
 
 func getConverter(domain string) *md.Converter {
@@ -104,7 +94,6 @@ func getConverter(domain string) *md.Converter {
 func convertToMarkdown(content string, domain string) string {
 	// 创建 HTML 到 Markdown 的转换器
 	converter := getConverter(domain)
-
 	// 转换 HTML 到 Markdown
 	markdown, err := converter.ConvertString(content)
 	if err != nil {
@@ -114,51 +103,44 @@ func convertToMarkdown(content string, domain string) string {
 }
 
 func handleWebpageToMarkdown(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("handleWebpageToMarkdown")
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var requestBody struct {
-		URL string `json:"url"`
-	}
-
-	err := json.NewDecoder(r.Body).Decode(&requestBody)
-	fmt.Println(requestBody.URL)
-	if err != nil {
-		log.WithError(err).Error("Failed to decode request body")
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if requestBody.URL == "" {
+	urlStr := r.URL.Query().Get("r")
+	if urlStr == "" {
 		http.Error(w, "URL is required", http.StatusBadRequest)
 		return
 	}
 
-	log.WithField("url", requestBody.URL).Info("Processing request")
+	log.WithField("url", urlStr).Info("Processing request")
 
-	html, err := fetchWebpage(requestBody.URL)
+	log.WithField("url", urlStr).Info("Processing request")
+
+	html, err := fetchWebpage(urlStr)
 	if err != nil {
-		log.WithError(err).WithField("url", requestBody.URL).Error("Failed to fetch webpage")
-		sendJSONResponse(w, Response{Error: fmt.Sprintf("Failed to fetch webpage: %v", err)}, http.StatusInternalServerError)
+		log.WithError(err).WithField("url", urlStr).Error("Failed to fetch webpage")
+		sendTextResponse(w, Response{Error: fmt.Sprintf("Failed to fetch webpage: %v", err)}, http.StatusInternalServerError)
 		return
 	}
 
-	content, _ := extractContent(html)
+	aritcle, _ := extractContent(html)
 	if err != nil {
-		log.WithError(err).WithField("url", requestBody.URL).Error("Failed to extract content")
-		sendJSONResponse(w, Response{Error: fmt.Sprintf("Failed to extract content: %v", err)}, http.StatusInternalServerError)
+		log.WithError(err).WithField("url", urlStr).Error("Failed to extract content")
+		sendTextResponse(w, Response{Error: fmt.Sprintf("Failed to extract content: %v", err)}, http.StatusInternalServerError)
 		return
 	}
 	//url获取domain
-	domain := getDomainFromURL(requestBody.URL)
-	markdown := convertToMarkdown(content, domain)
-
-	log.WithField("url", requestBody.URL).Info("Successfully processed webpage")
-	fmt.Println(markdown)
-	sendJSONResponse(w, Response{Markdown: markdown}, http.StatusOK)
+	domain := getDomainFromURL(urlStr)
+	markdown := convertToMarkdown(aritcle.Content, domain)
+	log.WithField("url", urlStr).Info("Successfully processed webpage")
+	ret := fmt.Sprintf("# %s \n", aritcle.Title)
+	ret += fmt.Sprintf("> %s \n\n", aritcle.Excerpt)
+	ret += fmt.Sprintf("*author: %s | PublishedTime: %s *\n", aritcle.Byline, aritcle.PublishedTime)
+	ret += fmt.Sprintf("![%s](%s \"可选的标题\")\n", aritcle.Title, aritcle.Image)
+	ret += fmt.Sprintf("\n%s \n", markdown)
+	sendTextResponse(w, Response{Markdown: ret}, http.StatusOK)
 }
 func getDomainFromURL(urlStr string) string {
 	parsedURL, err := url.Parse(urlStr)
@@ -168,19 +150,24 @@ func getDomainFromURL(urlStr string) string {
 	}
 	return parsedURL.Host
 }
-func sendJSONResponse(w http.ResponseWriter, response Response, statusCode int) {
-	w.Header().Set("Content-Type", "application/json")
+func sendTextResponse(w http.ResponseWriter, response Response, statusCode int) {
+	if statusCode != http.StatusOK {
+		http.Error(w, response.Error, statusCode)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(response)
+	fmt.Fprint(w, response.Markdown)
 }
 
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8087"
+		port = "8080"
 	}
 
-	http.HandleFunc("/convert", handleWebpageToMarkdown)
+	http.HandleFunc("/", handleWebpageToMarkdown)
 	fmt.Println("Server listening on port " + port)
 	log.Infof("Server starting on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {

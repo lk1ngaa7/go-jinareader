@@ -1,0 +1,28 @@
+# 忽略 Git 相关文件
+.git
+.gitignore
+
+# 忽略 Dockerfile 和 .dockerignore
+Dockerfile
+.dockerignore
+
+# 忽略日志文件
+*.log
+
+# 忽略编辑器相关文件
+.vscode/
+.idea/
+
+# 忽略本地开发配置文件
+*.env
+*.dev
+
+# 忽略测试文件
+*_test.go
+
+# 忽略构建生成的二进制文件和缓存
+main
+*.exe
+*.out
+*.test
+*.prof

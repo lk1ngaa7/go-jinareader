@@ -1,4 +1,4 @@
-module testcase
+module gojinareader
 
 go 1.20
 
