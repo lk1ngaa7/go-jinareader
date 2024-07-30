@@ -137,7 +137,7 @@ func handleWebpageToMarkdown(w http.ResponseWriter, r *http.Request) {
 	log.WithField("url", urlStr).Info("Successfully processed webpage")
 	ret := fmt.Sprintf("# %s \n", aritcle.Title)
 	ret += fmt.Sprintf("> %s \n\n", aritcle.Excerpt)
-	ret += fmt.Sprintf("*author: %s | PublishedTime: %s *\n", aritcle.Byline, aritcle.PublishedTime)
+	ret += fmt.Sprintf("**author: %s | PublishedTime: %s**\n", aritcle.Byline, aritcle.PublishedTime)
 	ret += fmt.Sprintf("![%s](%s \"可选的标题\")\n", aritcle.Title, aritcle.Image)
 	ret += fmt.Sprintf("\n%s \n", markdown)
 	sendTextResponse(w, Response{Markdown: ret}, http.StatusOK)
